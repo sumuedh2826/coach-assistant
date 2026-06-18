@@ -11,7 +11,12 @@ import os
 
 # ── Load API key from .env ─────────────────────────────────────────────────
 load_dotenv()
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+capi_key = os.getenv("OPENAI_API_KEY")
+
+if not api_key:
+    api_key = st.secrets["OPENAI_API_KEY"]
+
+client = OpenAI(api_key=api_key)
 
 # ── Load students from Excel ───────────────────────────────────────────────
 @st.cache_data
