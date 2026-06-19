@@ -5,3 +5,8 @@ openpyxl
 python-dotenv
 gspread
 google-auth
+chromadb
+langchain
+langchain-openai
+langchain-community
+langchain-text-splitters
