@@ -5,9 +5,12 @@ openpyxl
 python-dotenv
 gspread
 google-auth
-chromadb
 langchain
 langchain-openai
 langchain-community
 langchain-text-splitters
-langchain-chroma
+langchain-chroma==0.1.4
+chromadb==0.5.3
+protobuf==4.25.3
+opentelemetry-sdk==1.24.0
+opentelemetry-exporter-otlp-proto-grpc==1.24.0
