@@ -15,9 +15,7 @@ from agent import build_agent_executor
 load_dotenv()
 
 # ── Build RAG DB if not exists — needed for Streamlit Cloud ───────────────
-if not os.path.exists("chroma_db"):
-    import subprocess
-    subprocess.run(["python3", "rag_setup.py"])
+
 
 # ── Google Sheets — only for roster dropdown ──────────────────────────────
 def get_google_sheet_client():
