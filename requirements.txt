@@ -3,3 +3,5 @@ openai
 pandas
 openpyxl
 python-dotenv
+gspread
+google-auth
