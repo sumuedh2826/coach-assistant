@@ -24,7 +24,67 @@ def get_llm():
         max_tokens=500
     )
 
+# ── Summarise session for Mem0 storage ────────────────────────────────────
+# Called from app.py when student clicks End Session
+# Takes full chat history and asks AI to summarise what was discussed
+# Returns a plain text summary string
+def summarise_session(messages: list, student_name: str) -> str:
+    try:
+        llm = get_llm()
+
+        # Format chat history into readable text for summarisation
+        # We convert the list of dicts into a readable transcript
+        transcript = "\n".join([
+            f"{msg['role'].upper()}: {msg['content']}"
+            for msg in messages
+            if msg.get("content")  # skip messages with None content (tool calls)
+        ])
+
+        # Ask AI to summarise the session
+        # This summary gets stored in Mem0 as the student's memory
+        summary_prompt = f"""You are summarising a coaching session for {student_name}.
+
+Below is the full conversation transcript:
+
+{transcript}
+
+Write a concise summary (3-4 sentences) of the coaching session.
+
+Focus on:
+
+The student's main concerns, questions, or goals
+Any academic struggles, learning difficulties, or challenges mentioned
+Important action items or next steps discussed
+The student's overall mood, motivation, and engagement
+
+Include important academic information that may require follow-up in future sessions, such as:
+
+Exams occurring within the next 7 days
+Serious attendance concerns
+Low performance that needs attention
+Urgent academic deadlines
+
+Do NOT include:
+
+Detailed platform navigation questions
+Temporary tool outputs that are unlikely to matter later
+Long lists of exam schedules, scores, or attendance records
+Detailed explanations given by the assistant
+
+If any category is not present in the conversation, do not invent information.
+
+Write in third person using the student's name. Example: "{student_name} expressed concern about upcoming exams and appeared motivated to improve preparation."
+
+Return summary in small bullet points"""
+
+        from langchain_core.messages import HumanMessage
+        result = llm.invoke([HumanMessage(content=summary_prompt)])
+        return result.content
+
+    except Exception as e:
+        return f"Session summary could not be generated: {e}"
 # ── Load RAG vector store ──────────────────────────────────────────────────
+
 
 def load_vectorstore():
     embeddings = OpenAIEmbeddings(

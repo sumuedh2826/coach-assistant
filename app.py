@@ -11,11 +11,14 @@ import json
 import gspread
 from google.oauth2.service_account import Credentials
 from agent import build_agent_executor
-
+from memory import save_session_summary
+from agent import build_agent_executor, summarise_session
 load_dotenv()
 
 # ── Build RAG DB if not exists — needed for Streamlit Cloud ───────────────
-
+if not os.path.exists("chroma_db"):
+    import subprocess
+    subprocess.run(["python3", "rag_setup.py"])
 
 # ── Google Sheets — only for roster dropdown ──────────────────────────────
 def get_google_sheet_client():
@@ -73,11 +76,37 @@ if chat_key not in st.session_state:
     st.session_state[chat_key] = []
 
 # ── End Session ───────────────────────────────────────────────────────────
+# ── End Session ───────────────────────────────────────────────────────────
+# ── End Session ───────────────────────────────────────────────────────────
 if st.session_state[chat_key]:
     if st.button("End Session"):
+
+        # Only summarise and save if there are actual messages
+        if len(st.session_state[chat_key]) > 0:
+            with st.spinner("Saving session summary..."):
+
+                # Step 1 — Generate summary from full chat history
+                summary = summarise_session(
+                    st.session_state[chat_key],
+                    selected_student["name"]
+                )
+
+                
+
+                # Step 2 — Save summary to Mem0 mapped to this student
+                saved = save_session_summary(
+                    selected_student["student_id"],
+                    summary
+                )
+
+                if saved:
+                    st.success("Session saved successfully!")
+                else:
+                    st.warning("Session ended but memory could not be saved.")
+
+        #TEMPORARILY DISABLED FOR TESTING
         st.session_state[chat_key] = []
         st.rerun()
-
 # ── Display chat ───────────────────────────────────────────────────────────
 for message in st.session_state[chat_key]:
     with st.chat_message(message["role"]):
