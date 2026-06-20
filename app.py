@@ -1,7 +1,7 @@
 # app.py
-# Step 3 final — LangChain 1.x + LangGraph
-# UI only — all agent logic is in agent.py
-# student_id never passed to AI — pre-filled in agent.py using partial()
+# Student view — LangChain 1.x + LangGraph + Mem0 2.0.7
+# AI personalises responses using factual memory and session summaries
+# Two memory types saved separately after every session
 
 import streamlit as st
 from langchain_core.messages import HumanMessage, AIMessage
@@ -10,17 +10,17 @@ import os
 import json
 import gspread
 from google.oauth2.service_account import Credentials
-from agent import build_agent_executor
-from memory import save_session_summary
-from agent import build_agent_executor, summarise_session
+from agent import build_agent_executor, generate_session_summary, extract_factual_memory
+from memory import save_session_summary, save_factual_memory, get_all_student_memory
+
 load_dotenv()
 
-# ── Build RAG DB if not exists — needed for Streamlit Cloud ───────────────
+# ── Build RAG DB if not exists ─────────────────────────────────────────────
 if not os.path.exists("chroma_db"):
     import subprocess
     subprocess.run(["python3", "rag_setup.py"])
 
-# ── Google Sheets — only for roster dropdown ──────────────────────────────
+# ── Google Sheets — roster only ────────────────────────────────────────────
 def get_google_sheet_client():
     raw_json = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if raw_json:
@@ -44,12 +44,7 @@ def load_roster():
     except Exception as e:
         st.error(f"Could not load student list: {e}")
         return []
-@st.cache_resource
-def get_agent(student_name, student_id):
-    return build_agent_executor(
-        student_name,
-        student_id
-    )
+
 # ── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(page_title="Success Coach AI", page_icon="🎓")
 st.title("🎓 Success Coach AI")
@@ -75,38 +70,53 @@ chat_key = f"messages_{selected_student['student_id']}"
 if chat_key not in st.session_state:
     st.session_state[chat_key] = []
 
-# ── End Session ───────────────────────────────────────────────────────────
-# ── End Session ───────────────────────────────────────────────────────────
+# ── Memory preview — stays visible until student changes ──────────────────
+# Stores what was saved last session so student can see it
+preview_key = f"memory_preview_{selected_student['student_id']}"
+if preview_key not in st.session_state:
+    st.session_state[preview_key] = {"summary": "", "factual": ""}
+
+memory_preview = st.session_state[preview_key]
+if memory_preview["summary"] or memory_preview["factual"]:
+    with st.expander("Last Saved Memory", expanded=False):
+        if memory_preview["factual"] and memory_preview["factual"] != "NO_FACTUAL_CONTENT":
+            st.markdown("**Factual Memory:**")
+            st.write(memory_preview["factual"])
+        if memory_preview["summary"] and memory_preview["summary"] != "NO_SUMMARY":
+            st.markdown("**Session Summary:**")
+            st.write(memory_preview["summary"])
+
 # ── End Session ───────────────────────────────────────────────────────────
 if st.session_state[chat_key]:
     if st.button("End Session"):
+        with st.spinner("Saving session..."):
 
-        # Only summarise and save if there are actual messages
-        if len(st.session_state[chat_key]) > 0:
-            with st.spinner("Saving session summary..."):
+            messages = st.session_state[chat_key]
 
-                # Step 1 — Generate summary from full chat history
-                summary = summarise_session(
-                    st.session_state[chat_key],
-                    selected_student["name"]
-                )
+            # Generate both memory types from this conversation
+            summary = generate_session_summary(messages, selected_student["name"])
+            factual = extract_factual_memory(messages, selected_student["name"])
 
-                
+            # Store in session state for UI display
+            st.session_state[preview_key] = {
+                "summary": summary,
+                "factual": factual
+            }
 
-                # Step 2 — Save summary to Mem0 mapped to this student
-                saved = save_session_summary(
-                    selected_student["student_id"],
-                    summary
-                )
+            # Save to Mem0 only if meaningful content found
+            if summary != "NO_SUMMARY":
+                save_session_summary(selected_student["student_id"], summary)
 
-                if saved:
-                    st.success("Session saved successfully!")
-                else:
-                    st.warning("Session ended but memory could not be saved.")
+            if factual != "NO_FACTUAL_CONTENT":
+                save_factual_memory(selected_student["student_id"], factual)
 
-        #TEMPORARILY DISABLED FOR TESTING
+            st.success("Session saved!")
+
+        import time
+        time.sleep(1)
         st.session_state[chat_key] = []
         st.rerun()
+
 # ── Display chat ───────────────────────────────────────────────────────────
 for message in st.session_state[chat_key]:
     with st.chat_message(message["role"]):
@@ -123,31 +133,38 @@ if user_input:
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
 
-            # Convert stored chat history to LangChain message objects
-            # Skip last message — that is the current input we pass separately
+            # Fetch all memory from past sessions
+            # Injected before conversation so AI knows this student from message one
+            student_memory = get_all_student_memory(selected_student["student_id"])
+
             langchain_history = []
+
+            if student_memory:
+                # Memory injected as first exchange before any current messages
+                # This is what makes AI personalised from session one onwards
+                langchain_history.append(
+                    HumanMessage(content=f"[STUDENT HISTORY — use this to personalise your responses]\n{student_memory}")
+                )
+                langchain_history.append(
+                    AIMessage(content="Understood. I have reviewed this student's history and will personalise my responses accordingly.")
+                )
+
+            # Add current conversation history
             for msg in st.session_state[chat_key][:-1]:
                 if msg["role"] == "user":
                     langchain_history.append(HumanMessage(content=msg["content"]))
                 elif msg["role"] == "assistant":
                     langchain_history.append(AIMessage(content=msg["content"]))
 
-            # Add current message to history
+            # Add current message
             langchain_history.append(HumanMessage(content=user_input))
 
-            # Build agent with this student's ID pre-filled in tools
-            agent = get_agent(
+            agent = build_agent_executor(
                 selected_student["name"],
                 selected_student["student_id"]
             )
 
-            # invoke passes full message history to agent
-            # LangGraph handles tool calling loop internally
-            result = agent.invoke({
-                "messages": langchain_history
-            })
-
-            # Last message in result is always the final AI response
+            result = agent.invoke({"messages": langchain_history})
             reply = result["messages"][-1].content
 
         st.write(reply)

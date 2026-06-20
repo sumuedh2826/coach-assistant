@@ -1,7 +1,7 @@
 # agent.py
-# Fix: replaced functools.partial with a closure function
-# Closure = inner function that remembers variables from outer function
-# This gives the function a proper __name__ which @tool requires
+# LangChain 1.x + LangGraph
+# Tools: fetch_student_data (closure), search_platform_guide (RAG)
+# Bottom: generate_session_summary, extract_factual_memory for Mem0
 
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
@@ -24,68 +24,7 @@ def get_llm():
         max_tokens=500
     )
 
-# ── Summarise session for Mem0 storage ────────────────────────────────────
-# Called from app.py when student clicks End Session
-# Takes full chat history and asks AI to summarise what was discussed
-# Returns a plain text summary string
-def summarise_session(messages: list, student_name: str) -> str:
-    try:
-        llm = get_llm()
-
-        # Format chat history into readable text for summarisation
-        # We convert the list of dicts into a readable transcript
-        transcript = "\n".join([
-            f"{msg['role'].upper()}: {msg['content']}"
-            for msg in messages
-            if msg.get("content")  # skip messages with None content (tool calls)
-        ])
-
-        # Ask AI to summarise the session
-        # This summary gets stored in Mem0 as the student's memory
-        summary_prompt = f"""You are summarising a coaching session for {student_name}.
-
-Below is the full conversation transcript:
-
-{transcript}
-
-Write a concise summary (3-4 sentences) of the coaching session.
-
-Focus on:
-
-The student's main concerns, questions, or goals
-Any academic struggles, learning difficulties, or challenges mentioned
-Important action items or next steps discussed
-The student's overall mood, motivation, and engagement
-
-Include important academic information that may require follow-up in future sessions, such as:
-
-Exams occurring within the next 7 days
-Serious attendance concerns
-Low performance that needs attention
-Urgent academic deadlines
-
-Do NOT include:
-
-Detailed platform navigation questions
-Temporary tool outputs that are unlikely to matter later
-Long lists of exam schedules, scores, or attendance records
-Detailed explanations given by the assistant
-
-If any category is not present in the conversation, do not invent information.
-
-Write in third person using the student's name. Example: "{student_name} expressed concern about upcoming exams and appeared motivated to improve preparation."
-
-Return summary in small bullet points"""
-
-        from langchain_core.messages import HumanMessage
-        result = llm.invoke([HumanMessage(content=summary_prompt)])
-        return result.content
-
-    except Exception as e:
-        return f"Session summary could not be generated: {e}"
 # ── Load RAG vector store ──────────────────────────────────────────────────
-
-
 def load_vectorstore():
     embeddings = OpenAIEmbeddings(
         model="text-embedding-3-small",
@@ -103,7 +42,6 @@ def get_google_sheet_client():
         service_account_info = json.loads(raw_json)
     else:
         service_account_info = dict(st.secrets["GOOGLE_SERVICE_ACCOUNT_JSON"])
-
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
@@ -111,7 +49,7 @@ def get_google_sheet_client():
     creds = Credentials.from_service_account_info(service_account_info, scopes=scopes)
     return gspread.authorize(creds)
 
-# ── RAG tool — stays as normal @tool since query comes from AI ─────────────
+# ── RAG tool ───────────────────────────────────────────────────────────────
 @tool
 def search_platform_guide(query: str) -> str:
     """Searches the learning platform documentation to answer questions about platform features.
@@ -126,35 +64,23 @@ def search_platform_guide(query: str) -> str:
     - Bookmarks feature
     - Any how-to or what-is question about the learning platform
     Do NOT call this for personal data questions or general academic concept questions."""
-
     try:
         vectorstore = load_vectorstore()
-        print("=" * 50)
-        print("RAG TOOL CALLED")
-        print("QUERY:", query)
-        print("=" * 50)
         results = vectorstore.similarity_search(query, k=3)
-
         if not results:
             return "No relevant information found in the platform guide for this question."
-
         combined = "\n\n---\n\n".join([doc.page_content for doc in results])
         return f"PLATFORM GUIDE INFORMATION:\n\n{combined}"
-
     except Exception as e:
         return f"Could not search platform guide at this time: {str(e)}"
-
 
 # ── Build agent ────────────────────────────────────────────────────────────
 def build_agent_executor(student_name: str, student_id: str):
     llm = get_llm()
 
-    # ── Closure fix ───────────────────────────────────────────────────────
-    # We define fetch_student_data INSIDE build_agent_executor
-    # So it automatically remembers student_id from the outer function
-    # This is a closure — inner function captures outer function's variable
-    # It has a proper __name__ ("fetch_student_data") so @tool works fine
-    # AI calls this tool with no parameters — student_id is already captured
+    # fetch_student_data is defined inside build_agent_executor
+    # so it captures student_id from outer function automatically
+    # AI calls this with no parameters — student_id is already locked in
     @tool
     def fetch_student_data() -> str:
         """Fetches this student's personal academic data from the database.
@@ -166,7 +92,6 @@ def build_agent_executor(student_name: str, student_id: str):
         - Anything related to their personal academic records
         Do NOT call this for general academic questions or platform how-to questions.
         No parameters needed — student identity is already known."""
-
         try:
             spreadsheet_id = os.getenv("GOOGLE_SPREADSHEET_ID") or st.secrets.get("GOOGLE_SPREADSHEET_ID")
             gc = get_google_sheet_client()
@@ -177,7 +102,6 @@ def build_agent_executor(student_name: str, student_id: str):
             attendance    = spreadsheet.worksheet("attendance").get_all_records()
             exam_schedule = spreadsheet.worksheet("exam_schedule").get_all_records()
 
-            # student_id is captured from outer function — no parameter needed
             scores = [r for r in exam_scores   if r["student_id"] == student_id]
             attend = [r for r in attendance    if r["student_id"] == student_id]
             exams  = [r for r in exam_schedule if r["student_id"] == student_id]
@@ -204,7 +128,6 @@ UPCOMING EXAMS:
         except Exception as e:
             return f"Could not retrieve student data at this time: {str(e)}"
 
-    # ── System prompt ──────────────────────────────────────────────────────
     system_prompt = f"""You are an academic success coach AI assistant for {student_name}.
 
 You have access to two tools:
@@ -216,15 +139,12 @@ For everything else — general academic concepts, study strategies, motivation 
 When answering with student data:
 - Highlight anything needing attention: score below 50, attendance below 75%, exam within 7 days
 - Be supportive, empathetic, and constructive
-If fetch_student_data returns:
-"No academic data found for this student in the system."
 
-respond with exactly:
+If fetch_student_data returns no data respond with:
 "I currently do not have that information in the student database."
-Do not make up or assume any student records.
 
 When answering from platform guide:
-- If the tool returns no relevant information, tell the student honestly:
+- If the tool returns no relevant information tell the student:
   "I don't have that specific information about the platform. Please contact your program coordinator."
 - Never make up platform information
 
@@ -248,3 +168,95 @@ If outside scope respond with exactly:
         tools=[fetch_student_data, search_platform_guide],
         prompt=system_prompt
     )
+
+# ── Generate session summary ───────────────────────────────────────────────
+# Called from app.py on End Session
+# Saved as session_summary type in Mem0
+def generate_session_summary(messages: list, student_name: str) -> str:
+    try:
+        llm = get_llm()
+
+        transcript = "\n".join([
+            f"{msg['role'].upper()}: {msg['content']}"
+            for msg in messages
+            if msg.get("content")
+        ])
+
+        prompt = f"""You are summarising a coaching session for {student_name}.
+
+Transcript:
+{transcript}
+
+Write 3-5 bullet points covering ONLY what was actually discussed:
+- Main concerns or questions raised by the student
+- Academic struggles or challenges mentioned
+- Advice or action items given
+- Student mood and engagement level
+- Any urgent issues raised such as exams soon, payment problems, attendance issues
+
+Do NOT include:
+- Platform navigation answers or tool outputs
+- Anything not clearly said in the conversation
+- Guesses or assumptions
+
+If nothing meaningful was discussed write exactly: NO_SUMMARY
+
+Write in third person using the student name.
+Example: "{student_name} expressed concern about an upcoming exam and felt unprepared." """
+
+        result = llm.invoke([HumanMessage(content=prompt)])
+        return result.content.strip()
+
+    except Exception as e:
+        print(f"Summary generation error: {e}")
+        return "NO_SUMMARY"
+
+
+# ── Extract factual memory ─────────────────────────────────────────────────
+# Called from app.py on End Session
+# Saved as factual_memory type in Mem0
+# Used next version for urgency signals
+def extract_factual_memory(messages: list, student_name: str) -> str:
+    try:
+        llm = get_llm()
+
+        transcript = "\n".join([
+            f"{msg['role'].upper()}: {msg['content']}"
+            for msg in messages
+            if msg.get("content")
+        ])
+
+        prompt = f"""You are extracting persistent facts about {student_name} from a coaching session.
+
+Transcript:
+{transcript}
+
+Extract ONLY facts explicitly mentioned in the conversation.
+Do NOT guess or assume anything not clearly stated.
+Skip any category where nothing relevant was said.
+
+Categories to extract if present:
+STRESS TRIGGER: Things that cause this student stress or anxiety
+PROBLEM: Academic, personal, financial or attendance problems mentioned
+WHAT HELPS: Things that have helped this student cope or improve
+LEARNING STYLE: How they prefer to learn or study
+PERSONAL CONTEXT: Job, family, finances affecting their studies
+GOAL: What the student wants to achieve
+
+One fact per line starting with the category label.
+Only include what was explicitly said in the conversation.
+
+Example:
+STRESS TRIGGER: {student_name} gets very anxious the night before exams and cannot sleep.
+PROBLEM: {student_name} is struggling with Data Structures and finds recursion very hard.
+PERSONAL CONTEXT: {student_name} works a part time job and can only study in the evenings.
+GOAL: {student_name} wants to get placed in a product based company.
+
+If nothing factual was shared write exactly: NO_FACTUAL_CONTENT"""
+
+        result = llm.invoke([HumanMessage(content=prompt)])
+        return result.content.strip()
+
+    except Exception as e:
+        print(f"Factual memory extraction error: {e}")
+        return "NO_FACTUAL_CONTENT"
