@@ -131,3 +131,47 @@ def get_all_student_memory(student_id: str) -> str:
     factual   = get_factual_memory(student_id)
     summaries = get_session_summaries(student_id)
     return "\n\n".join(filter(None, [factual, summaries]))
+# ── Save signal ────────────────────────────────────────────────────────────
+# Called after flagging agent runs
+# Saves signal as a separate memory type mapped to student
+# Coach view will fetch these signals later
+def save_signal(student_id: str, signal: dict) -> bool:
+    try:
+        import json
+        client = get_mem0_client()
+        client.add(
+            messages=[{"role": "user", "content": json.dumps(signal)}],
+            user_id=student_id,
+            metadata={"type": "signal"}
+        )
+        return True
+    except Exception as e:
+        print(f"Signal save error: {e}")
+        return False
+
+# ── Fetch latest signal for a student ─────────────────────────────────────
+# Used in coach view to show urgency for each student
+def get_latest_signal(student_id: str) -> dict:
+    try:
+        import json
+        client = get_mem0_client()
+        results = _fetch_by_type(
+            client=client,
+            query="student signal severity urgency coach alert",
+            student_id=student_id,
+            memory_type="signal",
+            limit=1
+        )
+        if not results:
+            return {}
+
+        # Signal was stored as JSON string in memory field
+        raw = results[0].get("memory", "")
+        try:
+            return json.loads(raw)
+        except Exception:
+            return {"raw": raw}
+
+    except Exception as e:
+        print(f"Get signal error: {e}")
+        return {}

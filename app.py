@@ -12,7 +12,9 @@ import gspread
 from google.oauth2.service_account import Credentials
 from agent import build_agent_executor, generate_session_summary, extract_factual_memory
 from memory import save_session_summary, save_factual_memory, get_all_student_memory
-
+from agent import build_agent_executor, generate_session_summary, extract_factual_memory
+from memory import save_session_summary, save_factual_memory, get_all_student_memory, save_signal
+from flagging_agent import run_flagging_agent
 load_dotenv()
 
 # ── Build RAG DB if not exists ─────────────────────────────────────────────
@@ -85,6 +87,28 @@ if memory_preview["summary"] or memory_preview["factual"]:
         if memory_preview["summary"] and memory_preview["summary"] != "NO_SUMMARY":
             st.markdown("**Session Summary:**")
             st.write(memory_preview["summary"])
+# ── Signal preview ────────────────────────────────────────────────────────
+signal_preview_key = f"signal_preview_{selected_student['student_id']}"
+signal_preview = st.session_state.get(signal_preview_key)
+
+if signal_preview and signal_preview.get("severity"):
+
+    with st.expander("🚨 Last Signal", expanded=False):
+
+        severity = signal_preview.get("severity")
+
+        if severity == "high":
+            st.error("🔴 HIGH")
+
+        elif severity == "medium":
+            st.warning("🟡 MEDIUM")
+
+        st.write("Reason:")
+        st.write(signal_preview.get("reason", ""))
+
+        if signal_preview.get("signal_summary"):
+            st.write("Coach Summary:")
+            st.write(signal_preview.get("signal_summary"))
 
 # ── End Session ───────────────────────────────────────────────────────────
 if st.session_state[chat_key]:
@@ -93,27 +117,55 @@ if st.session_state[chat_key]:
 
             messages = st.session_state[chat_key]
 
-            # Generate both memory types from this conversation
+            # Step 1 — Generate both memory types
             summary = generate_session_summary(messages, selected_student["name"])
             factual = extract_factual_memory(messages, selected_student["name"])
 
-            # Store in session state for UI display
+            # Step 2 — Store in session state for UI display
             st.session_state[preview_key] = {
                 "summary": summary,
                 "factual": factual
             }
 
-            # Save to Mem0 only if meaningful content found
+            # Step 3 — Save to Mem0
             if summary != "NO_SUMMARY":
                 save_session_summary(selected_student["student_id"], summary)
 
             if factual != "NO_FACTUAL_CONTENT":
                 save_factual_memory(selected_student["student_id"], factual)
 
+            # Step 4 — Run flagging agent on factual memory
+            # Flagging agent reads factual memory and decides severity and urgency
+            # Signal is saved to Mem0 for coach view to use later
+            signal = run_flagging_agent(
+                student_name=selected_student["name"],
+                student_id=selected_student["student_id"],
+                factual_memory=factual
+            )
+            # Store signal so it survives rerun
+            signal_preview_key = f"signal_preview_{selected_student['student_id']}"
+            st.session_state[signal_preview_key] = signal
+
+            # Save signal to Mem0
+            save_signal(selected_student["student_id"], signal)
+
+            # Show signal in UI
+            severity = signal.get("severity")
+
+            if severity == "high":
+                st.error(f"🔴 HIGH — Coach must meet today")
+                st.caption(signal.get("reason", ""))
+            elif severity == "medium":
+                st.warning(f"🟡 MEDIUM — Meet today if slot available, otherwise tomorrow")
+                st.caption(signal.get("reason", ""))
+            else:
+                st.success("Session saved — no urgent signals found")
+
             st.success("Session saved!")
+           
 
         import time
-        time.sleep(1)
+        time.sleep(2)
         st.session_state[chat_key] = []
         st.rerun()
 

@@ -186,23 +186,38 @@ def generate_session_summary(messages: list, student_name: str) -> str:
 
 Transcript:
 {transcript}
+Write 3-5 bullet points covering ONLY what was actually discussed in this session:
 
-Write 3-5 bullet points covering ONLY what was actually discussed:
-- Main concerns or questions raised by the student
-- Academic struggles or challenges mentioned
-- Advice or action items given
-- Student mood and engagement level
-- Any urgent issues raised such as exams soon, payment problems, attendance issues
+Questions or concerns raised by the student
+Academic topics discussed
+Personal academic information reviewed (scores, attendance, upcoming exams, deadlines, payment issues, etc.)
+Any action items or next steps agreed upon
+Overall student mood and engagement during the conversation
+
+Focus on what happened in this specific session.
 
 Do NOT include:
-- Platform navigation answers or tool outputs
-- Anything not clearly said in the conversation
-- Guesses or assumptions
 
-If nothing meaningful was discussed write exactly: NO_SUMMARY
+Stress triggers
+Learning style
+Long-term personality traits
+Goals unless explicitly discussed in this session
+Assumptions, interpretations, or guesses
+Anything not clearly mentioned in the conversation
 
-Write in third person using the student name.
-Example: "{student_name} expressed concern about an upcoming exam and felt unprepared." """
+If an upcoming exam, attendance issue, low score, payment issue, or other urgent academic matter was discussed, include it.
+
+If nothing meaningful was discussed, write exactly:
+NO_SUMMARY
+
+Write in third person using the student's name.
+
+Example:
+
+Priya Sharma asked about her upcoming exams and reviewed the exam schedule.
+Priya Sharma discussed strategies for preparing for the System Design exam.
+A revision plan for the next week was suggested.
+Priya Sharma appeared engaged and motivated throughout the discussion. """
 
         result = llm.invoke([HumanMessage(content=prompt)])
         return result.content.strip()
@@ -231,28 +246,59 @@ def extract_factual_memory(messages: list, student_name: str) -> str:
 Transcript:
 {transcript}
 
-Extract ONLY facts explicitly mentioned in the conversation.
-Do NOT guess or assume anything not clearly stated.
-Skip any category where nothing relevant was said.
+Extract ONLY persistent or important facts explicitly mentioned in the conversation.
+
+Do NOT guess, infer, interpret, or assume anything that was not clearly stated by the student.
+
+Do NOT create facts simply to fill categories.
+
+If a category was not discussed, omit that category completely.
+
+Only extract information that was directly mentioned during the conversation.
+
+Prioritise:
+
+* Stress, anxiety, worries, or emotional concerns
+* Academic challenges or learning difficulties
+* Upcoming exams within 7 days that the student is concerned about
+* Attendance issues
+* Low scores or academic performance concerns
+* Payment, refund, financial, or subscription issues
+* Concerns about leaving, dropping, or continuing the platform/program
+* Personal circumstances affecting academic progress
 
 Categories to extract if present:
-STRESS TRIGGER: Things that cause this student stress or anxiety
-PROBLEM: Academic, personal, financial or attendance problems mentioned
-WHAT HELPS: Things that have helped this student cope or improve
-LEARNING STYLE: How they prefer to learn or study
-PERSONAL CONTEXT: Job, family, finances affecting their studies
-GOAL: What the student wants to achieve
 
-One fact per line starting with the category label.
-Only include what was explicitly said in the conversation.
+STRESS TRIGGER: Situations that cause stress, anxiety, pressure, or worry.
 
-Example:
-STRESS TRIGGER: {student_name} gets very anxious the night before exams and cannot sleep.
-PROBLEM: {student_name} is struggling with Data Structures and finds recursion very hard.
-PERSONAL CONTEXT: {student_name} works a part time job and can only study in the evenings.
-GOAL: {student_name} wants to get placed in a product based company.
+PROBLEM: Academic, attendance, financial, payment/refund, platform-related, or personal challenges affecting progress.
 
-If nothing factual was shared write exactly: NO_FACTUAL_CONTENT"""
+PERSONAL CONTEXT: Job, family, finances, health, schedule constraints, or other circumstances affecting studies.
+
+GOAL: What the student wants to achieve academically or professionally.
+
+Rules:
+
+* One fact per line.
+* Start every line with the category label.
+* Only include categories that were explicitly discussed.
+* If only one category was discussed, output only that category.
+* Never generate placeholder facts.
+* Never infer emotions, goals, or problems from simple questions.
+* Exam dates should only be extracted if the student expressed concern, urgency, pressure, confusion, or preparation challenges related to the exam.
+
+Example output:
+
+STRESS TRIGGER: Priya Sharma is anxious about an upcoming System Design exam scheduled within the next week.
+
+PROBLEM: Priya Sharma is struggling with Data Structures and finds recursion difficult.
+
+GOAL: Priya Sharma wants to secure a software engineering placement.
+
+If no meaningful factual memory was explicitly discussed, write exactly:
+
+NO_FACTUAL_CONTENT
+"""
 
         result = llm.invoke([HumanMessage(content=prompt)])
         return result.content.strip()
