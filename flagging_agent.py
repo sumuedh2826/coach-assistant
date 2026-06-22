@@ -46,7 +46,7 @@ HIGH — coach must meet this student today, rescheduling will happen if needed:
 - Student said they are not feeling well emotionally or physically
 - Complete loss of motivation or confidence
 - Family crisis directly impacting studies
-- student is stressed or feeling unprepared
+- student is stressed or feeling unprepared abt exams or anything
 - Attendance critically low below 60 percent
 
 MEDIUM — meet today if coach has a free slot, otherwise tomorrow:
